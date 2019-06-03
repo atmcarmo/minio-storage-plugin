@@ -1,12 +1,7 @@
 package org.jenkinsci.plugins.minio;
 
 import io.minio.MinioClient;
-import io.minio.errors.ErrorResponseException;
-import io.minio.errors.InsufficientDataException;
-import io.minio.errors.InternalException;
-import io.minio.errors.InvalidArgumentException;
-import io.minio.errors.InvalidBucketNameException;
-import io.minio.errors.NoResponseException;
+import io.minio.errors.*;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -15,36 +10,22 @@ import java.io.InputStream;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 
-import org.jenkinsci.plugins.minio.MinioUploader.DescriptorImpl;
+import org.jenkinsci.plugins.minio.MinioClientFactory;
 import org.jenkinsci.remoting.RoleChecker;
 import org.kohsuke.stapler.DataBoundConstructor;
-import org.kohsuke.stapler.StaplerRequest;
 import org.xmlpull.v1.XmlPullParserException;
 
 import hudson.FilePath;
 import hudson.FilePath.FileCallable;
 import hudson.model.TaskListener;
 import hudson.remoting.VirtualChannel;
-import hudson.tasks.Builder;
 
-/**
- * Sample {@link Builder}.
- *
- * <p>
- * When the user calls the act method, the invoke method is called
- * which in turn uploads the files using minioCLinet.
- *
- * <p>
- * @author Ashish Sinha
- *
- */
-
-public class MinioAllPathUploader implements FileCallable<Void> {
+public class MinioUploaderCallable implements FileCallable<Void> {
 	private static final long serialVersionUID = 1;
 
 	private MinioClientFactory minioClientFactory;
 	/**
-	 * Bucket name to store the build artifacts.
+	 * Bucket name to store the job artifacts.
 	 */
 	private String bucketName;
 
@@ -54,18 +35,18 @@ public class MinioAllPathUploader implements FileCallable<Void> {
 	private FilePath path;
 
 	/**
-	 * The name of the file .
+	 * The name of the file.
 	 */
 	private String fileName;
 
 	/**
-	 * TaskListener listener needed for reading the exception.
+	 * TaskListener listener needed for reading exceptions.
 	 */
 	TaskListener listener;
 
 	@DataBoundConstructor
-	public MinioAllPathUploader(MinioClientFactory minioClientFactory, String bucketName,
-			FilePath path, String fileName, TaskListener listener) {
+	public MinioUploaderCallable(MinioClientFactory minioClientFactory, String bucketName,
+								 FilePath path, String fileName, TaskListener listener) {
 		this.minioClientFactory = minioClientFactory;
 		this.bucketName = bucketName;
 		this.path = path;
@@ -78,23 +59,27 @@ public class MinioAllPathUploader implements FileCallable<Void> {
 		// not implemented
 	}
 
-
 	/**
-	 * This method uses minioClient to upload the Object.
-	 * @return
+	 * invoke uses minioClient to upload the Object.
 	 */
 	@Override
 	public Void invoke(File f, VirtualChannel channel) throws IOException,
 			InterruptedException {
 		InputStream stream = null;
-
 		try {
-
 			stream = new FileInputStream(path.getRemote());
 			String contentType = "application/octet-stream";
 			MinioClient minioClient = minioClientFactory.createClient();
-			minioClient.putObject(bucketName, fileName, stream, contentType);
 
+			// Check if bucket already exists
+			boolean bucketFound = minioClient.bucketExists(bucketName);
+
+			// If bucket not present, create bucket
+			if (!bucketFound) {
+				minioClient.makeBucket(bucketName);
+			}
+
+			minioClient.putObject(bucketName, fileName, stream, contentType);
 		} catch (InvalidKeyException | InvalidBucketNameException
 				| NoSuchAlgorithmException | InsufficientDataException
 				| NoResponseException | ErrorResponseException
@@ -103,11 +88,12 @@ public class MinioAllPathUploader implements FileCallable<Void> {
 			e.printStackTrace(listener.error("Minio error, failed to upload files"));
 		} catch (IOException e) {
 			e.printStackTrace(listener.error("Communication error, failed to upload files"));
+		} catch (RegionConflictException e) {
+			e.printStackTrace(listener.error("Minio error, failed to upload files"));
 		} finally {
 			if (stream != null)
 				stream.close();
 		}
 		return null;
 	}
-
 }

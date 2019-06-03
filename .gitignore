@@ -16,3 +16,9 @@ hs_err_pid*
 
 target
 /bin/
+
+*.iml
+work
+.DS_Store
+.idea
+.idea/*
